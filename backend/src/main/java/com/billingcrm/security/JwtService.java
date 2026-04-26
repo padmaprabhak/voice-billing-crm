@@ -1,6 +1,5 @@
 package com.billingcrm.security;
 
-import com.billingcrm.model.User;
 import io.jsonwebtoken.*;
 import io.jsonwebtoken.security.Keys;
 import lombok.extern.slf4j.Slf4j;
@@ -25,50 +24,71 @@ public class JwtService {
     @Value("${app.jwt.expiration-ms:86400000}")
     private long jwtExpirationMs;
 
-    public String generateToken(User user) {
-        Map<String, Object> claims = new HashMap<>();
-        claims.put("id",    user.getId());
-        claims.put("name",  user.getName());
-        claims.put("role",  user.getRole().name());
-        return buildToken(claims, user.getEmail(), jwtExpirationMs);
+    // ── Generate ──────────────────────────────────────────────────────
+
+    public String generateToken(UserDetails userDetails) {
+        return generateToken(new HashMap<>(), userDetails);
     }
 
-    private String buildToken(Map<String, Object> claims, String subject, long expiration) {
+    public String generateToken(Map<String, Object> extraClaims, UserDetails userDetails) {
+        String subject = userDetails.getUsername();
+        log.debug("[JwtService] Generating token for subject: {}", subject);
+
         return Jwts.builder()
-            .claims(claims)
-            .subject(subject)
-            .issuedAt(new Date())
-            .expiration(new Date(System.currentTimeMillis() + expiration))
-            .signWith(getSigningKey())
-            .compact();
+                .claims(extraClaims)
+                .subject(subject)
+                .issuedAt(new Date())
+                .expiration(new Date(System.currentTimeMillis() + jwtExpirationMs))
+                .signWith(getSigningKey())
+                .compact();
     }
+
+    // ── Validate ──────────────────────────────────────────────────────
 
     public boolean isTokenValid(String token, UserDetails userDetails) {
-        final String username = extractUsername(token);
-        return username.equals(userDetails.getUsername()) && !isTokenExpired(token);
+        try {
+            final String subject = extractUsername(token);
+            boolean valid = subject.equals(userDetails.getUsername()) && !isTokenExpired(token);
+            log.debug("[JwtService] isValid={} subject={}", valid, subject);
+            return valid;
+        } catch (Exception e) {
+            log.warn("[JwtService] Validation error: {}", e.getMessage());
+            return false;
+        }
     }
+
+    // ── Extract ───────────────────────────────────────────────────────
 
     public String extractUsername(String token) {
         return extractClaim(token, Claims::getSubject);
     }
 
-    public <T> T extractClaim(String token, Function<Claims, T> claimsResolver) {
-        return claimsResolver.apply(extractAllClaims(token));
+    public <T> T extractClaim(String token, Function<Claims, T> resolver) {
+        return resolver.apply(extractAllClaims(token));
     }
 
     private Claims extractAllClaims(String token) {
         return Jwts.parser()
-            .verifyWith(getSigningKey())
-            .build()
-            .parseSignedClaims(token)
-            .getPayload();
+                .verifyWith(getSigningKey())
+                .build()
+                .parseSignedClaims(token)
+                .getPayload();
     }
 
     private boolean isTokenExpired(String token) {
         return extractClaim(token, Claims::getExpiration).before(new Date());
     }
 
+    // ── Key ───────────────────────────────────────────────────────────
+
     private SecretKey getSigningKey() {
-        return Keys.hmacShaKeyFor(jwtSecret.getBytes(StandardCharsets.UTF_8));
+        byte[] keyBytes = jwtSecret.getBytes(StandardCharsets.UTF_8);
+        // Pad to 64 bytes if needed (512 bits for HS512)
+        if (keyBytes.length < 64) {
+            byte[] padded = new byte[64];
+            System.arraycopy(keyBytes, 0, padded, 0, keyBytes.length);
+            return Keys.hmacShaKeyFor(padded);
+        }
+        return Keys.hmacShaKeyFor(keyBytes);
     }
 }

@@ -24,6 +24,15 @@ export default defineConfig([
     },
     rules: {
       'no-unused-vars': ['error', { varsIgnorePattern: '^[A-Z_]' }],
+      'react/jsx-uses-vars': 'error',
     },
   },
+  module.exports = {
+  plugins: ['react'],
+  settings: {
+    react: {
+      version: 'detect',
+    },
+  },
+}
 ])
